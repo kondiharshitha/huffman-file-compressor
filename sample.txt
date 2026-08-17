@@ -1,0 +1,4 @@
+hello hello hello
+this is a huffman compression test
+this is a huffman compression test
+huffman coding is a lossless compression algorithm
