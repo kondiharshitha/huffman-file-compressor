@@ -2,10 +2,9 @@
 #include <fstream>
 #include <vector>
 #include <string>
-#include <unordered_map>
+#include <array>
 #include <queue>
 #include <cstdint>
-#include <iomanip>
 
 using namespace std;
 
@@ -26,7 +25,8 @@ public:
 
 struct Compare {
     bool operator()(Node* a, Node* b) {
-        return a->freq > b->freq;
+        if (a->freq != b->freq) return a->freq > b->freq;
+        return a->ch > b->ch;
     }
 };
 
@@ -37,7 +37,7 @@ void deleteTree(Node* root) {
     delete root;
 }
 
-void buildCodes(Node* root, string code, unordered_map<unsigned char, string>& codes) {
+void buildCodes(Node* root, string code, array<string, 256>& codes) {
     if (!root) return;
 
     if (root->isLeaf()) {
@@ -49,19 +49,22 @@ void buildCodes(Node* root, string code, unordered_map<unsigned char, string>& c
     buildCodes(root->right, code + "1", codes);
 }
 
-Node* buildTree(const unordered_map<unsigned char, uint64_t>& freq) {
+Node* buildTree(const array<uint64_t, 256>& freq) {
     priority_queue<Node*, vector<Node*>, Compare> heap;
 
-    for (auto& p : freq)
-        heap.push(new Node(p.first, p.second));
+    for (int i = 0; i < 256; i++)
+        if (freq[i] > 0)
+            heap.push(new Node(static_cast<unsigned char>(i), freq[i]));
 
     if (heap.empty()) return nullptr;
 
     while (heap.size() > 1) {
         Node* left = heap.top();
         heap.pop();
+
         Node* right = heap.top();
         heap.pop();
+
         heap.push(new Node(left, right));
     }
 
@@ -76,7 +79,7 @@ bool compressFile(const string& inputFile, const string& outputFile) {
         return false;
     }
 
-    unordered_map<unsigned char, uint64_t> freq;
+    array<uint64_t, 256> freq{};
     uint64_t originalSize = 0;
     unsigned char byte;
 
@@ -89,15 +92,6 @@ bool compressFile(const string& inputFile, const string& outputFile) {
 
     Node* root = buildTree(freq);
 
-    if (!root) {
-        ofstream output(outputFile, ios::binary);
-        output.close();
-        return true;
-    }
-
-    unordered_map<unsigned char, string> codes;
-    buildCodes(root, "", codes);
-
     ofstream output(outputFile, ios::binary);
 
     if (!output) {
@@ -109,14 +103,29 @@ bool compressFile(const string& inputFile, const string& outputFile) {
     output.write("HUF1", 4);
     output.write(reinterpret_cast<char*>(&originalSize), sizeof(originalSize));
 
-    uint16_t uniqueSymbols = freq.size();
+    uint16_t uniqueSymbols = 0;
+
+    for (int i = 0; i < 256; i++)
+        if (freq[i] > 0)
+            uniqueSymbols++;
+
     output.write(reinterpret_cast<char*>(&uniqueSymbols), sizeof(uniqueSymbols));
 
-    for (auto& p : freq) {
-        unsigned char symbol = p.first;
-        output.write(reinterpret_cast<char*>(&symbol), 1);
-        output.write(reinterpret_cast<char*>(&p.second), sizeof(p.second));
+    for (int i = 0; i < 256; i++) {
+        if (freq[i] > 0) {
+            unsigned char symbol = static_cast<unsigned char>(i);
+            output.write(reinterpret_cast<char*>(&symbol), 1);
+            output.write(reinterpret_cast<char*>(&freq[i]), sizeof(freq[i]));
+        }
     }
+
+    if (!root) {
+        output.close();
+        return true;
+    }
+
+    array<string, 256> codes;
+    buildCodes(root, "", codes);
 
     input.open(inputFile, ios::binary);
 
@@ -170,7 +179,7 @@ bool decompressFile(const string& inputFile, const string& outputFile) {
     input.read(reinterpret_cast<char*>(&originalSize), sizeof(originalSize));
     input.read(reinterpret_cast<char*>(&uniqueSymbols), sizeof(uniqueSymbols));
 
-    unordered_map<unsigned char, uint64_t> freq;
+    array<uint64_t, 256> freq{};
 
     for (int i = 0; i < uniqueSymbols; i++) {
         unsigned char symbol;
@@ -243,13 +252,11 @@ int main(int argc, char* argv[]) {
     string inputFile = argv[2];
     string outputFile = argv[3];
 
-    if (operation == "compress") {
+    if (operation == "compress")
         return compressFile(inputFile, outputFile) ? 0 : 1;
-    }
 
-    if (operation == "decompress") {
+    if (operation == "decompress")
         return decompressFile(inputFile, outputFile) ? 0 : 1;
-    }
 
     return 1;
 }
