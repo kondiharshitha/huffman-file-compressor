@@ -1,377 +1,255 @@
 #include <iostream>
 #include <fstream>
-#include <iomanip>
-#include <array>
 #include <vector>
 #include <string>
+#include <unordered_map>
+#include <queue>
 #include <cstdint>
-#include <utility>
+#include <iomanip>
 
-class HuffmanNode {
+using namespace std;
+
+class Node {
 public:
-    int symbol;
-    uint64_t frequency;
-    HuffmanNode* left;
-    HuffmanNode* right;
+    unsigned char ch;
+    uint64_t freq;
+    Node* left;
+    Node* right;
 
-    HuffmanNode(int symbol, uint64_t frequency) : symbol(symbol), frequency(frequency), left(nullptr), right(nullptr) {}
-    bool isLeaf() const { return left == nullptr && right == nullptr; }
-};
+    Node(unsigned char c, uint64_t f) : ch(c), freq(f), left(nullptr), right(nullptr) {}
+    Node(Node* l, Node* r) : ch(0), freq(l->freq + r->freq), left(l), right(r) {}
 
-class MinHeap {
-private:
-    std::vector<HuffmanNode*> heap;
-
-    void heapifyUp(int index) {
-        while (index > 0) {
-            int parent = (index - 1) / 2;
-            if (heap[parent]->frequency <= heap[index]->frequency) break;
-            std::swap(heap[parent], heap[index]);
-            index = parent;
-        }
-    }
-
-    void heapifyDown(int index) {
-        int n = heap.size();
-
-        while (true) {
-            int smallest = index;
-            int left = 2 * index + 1;
-            int right = 2 * index + 2;
-
-            if (left < n && heap[left]->frequency < heap[smallest]->frequency) smallest = left;
-            if (right < n && heap[right]->frequency < heap[smallest]->frequency) smallest = right;
-            if (smallest == index) break;
-
-            std::swap(heap[index], heap[smallest]);
-            index = smallest;
-        }
-    }
-
-public:
-    void insert(HuffmanNode* node) {
-        heap.push_back(node);
-        heapifyUp(heap.size() - 1);
-    }
-
-    HuffmanNode* extractMin() {
-        if (heap.empty()) return nullptr;
-
-        HuffmanNode* minimum = heap[0];
-        heap[0] = heap.back();
-        heap.pop_back();
-
-        if (!heap.empty()) heapifyDown(0);
-
-        return minimum;
-    }
-
-    int size() const {
-        return static_cast<int>(heap.size());
-    }
-
-    bool empty() const {
-        return heap.empty();
+    bool isLeaf() const {
+        return left == nullptr && right == nullptr;
     }
 };
 
-class HuffmanCoding {
-private:
-    HuffmanNode* root;
+struct Compare {
+    bool operator()(Node* a, Node* b) {
+        return a->freq > b->freq;
+    }
+};
 
-    void deleteTree(HuffmanNode* node) {
-        if (node == nullptr) return;
-        deleteTree(node->left);
-        deleteTree(node->right);
-        delete node;
+void deleteTree(Node* root) {
+    if (!root) return;
+    deleteTree(root->left);
+    deleteTree(root->right);
+    delete root;
+}
+
+void buildCodes(Node* root, string code, unordered_map<unsigned char, string>& codes) {
+    if (!root) return;
+
+    if (root->isLeaf()) {
+        codes[root->ch] = code.empty() ? "0" : code;
+        return;
     }
 
-    void clearTree() {
-        deleteTree(root);
-        root = nullptr;
+    buildCodes(root->left, code + "0", codes);
+    buildCodes(root->right, code + "1", codes);
+}
+
+Node* buildTree(const unordered_map<unsigned char, uint64_t>& freq) {
+    priority_queue<Node*, vector<Node*>, Compare> heap;
+
+    for (auto& p : freq)
+        heap.push(new Node(p.first, p.second));
+
+    if (heap.empty()) return nullptr;
+
+    while (heap.size() > 1) {
+        Node* left = heap.top();
+        heap.pop();
+        Node* right = heap.top();
+        heap.pop();
+        heap.push(new Node(left, right));
     }
 
-    void buildTree(const std::array<uint64_t, 256>& frequencies) {
-        clearTree();
+    return heap.top();
+}
 
-        MinHeap minHeap;
+bool compressFile(const string& inputFile, const string& outputFile) {
+    ifstream input(inputFile, ios::binary);
 
-        for (int i = 0; i < 256; ++i) {
-            if (frequencies[i] > 0) minHeap.insert(new HuffmanNode(i, frequencies[i]));
-        }
-
-        if (minHeap.empty()) return;
-
-        while (minHeap.size() > 1) {
-            HuffmanNode* left = minHeap.extractMin();
-            HuffmanNode* right = minHeap.extractMin();
-
-            HuffmanNode* parent = new HuffmanNode(-1, left->frequency + right->frequency);
-            parent->left = left;
-            parent->right = right;
-
-            minHeap.insert(parent);
-        }
-
-        root = minHeap.extractMin();
+    if (!input) {
+        cerr << "Could not open input file\n";
+        return false;
     }
 
-    void generateCodes(HuffmanNode* node, const std::string& code, std::array<std::string, 256>& codes) {
-        if (node == nullptr) return;
+    unordered_map<unsigned char, uint64_t> freq;
+    uint64_t originalSize = 0;
+    unsigned char byte;
 
-        if (node->isLeaf()) {
-            codes[node->symbol] = code.empty() ? "0" : code;
-            return;
-        }
-
-        generateCodes(node->left, code + "0", codes);
-        generateCodes(node->right, code + "1", codes);
+    while (input.read(reinterpret_cast<char*>(&byte), 1)) {
+        freq[byte]++;
+        originalSize++;
     }
 
-public:
-    HuffmanCoding() : root(nullptr) {}
+    input.close();
 
-    ~HuffmanCoding() {
-        deleteTree(root);
-    }
+    Node* root = buildTree(freq);
 
-    bool compressFile(const std::string& inputFile, const std::string& outputFile) {
-        std::ifstream input(inputFile, std::ios::binary);
-
-        if (!input) {
-            std::cerr << "Error: Could not open input file.\n";
-            return false;
-        }
-
-        std::array<uint64_t, 256> frequencies{};
-        unsigned char byte;
-
-        while (input.read(reinterpret_cast<char*>(&byte), sizeof(byte))) {
-            frequencies[byte]++;
-        }
-
-        input.close();
-
-        buildTree(frequencies);
-
-        std::array<std::string, 256> codes{};
-
-        if (root != nullptr) generateCodes(root, "", codes);
-
-        std::ofstream output(outputFile, std::ios::binary);
-
-        if (!output) {
-            std::cerr << "Error: Could not create output file.\n";
-            return false;
-        }
-
-        const char magic[4] = {'H', 'U', 'F', '2'};
-        output.write(magic, sizeof(magic));
-
-        uint64_t originalSize = 0;
-        uint16_t uniqueSymbols = 0;
-
-        for (uint64_t frequency : frequencies) {
-            originalSize += frequency;
-            if (frequency > 0) uniqueSymbols++;
-        }
-
-        output.write(reinterpret_cast<const char*>(&originalSize), sizeof(originalSize));
-        output.write(reinterpret_cast<const char*>(&uniqueSymbols), sizeof(uniqueSymbols));
-
-        for (int i = 0; i < 256; ++i) {
-            if (frequencies[i] > 0) {
-                uint8_t symbol = static_cast<uint8_t>(i);
-                output.write(reinterpret_cast<const char*>(&symbol), sizeof(symbol));
-                output.write(reinterpret_cast<const char*>(&frequencies[i]), sizeof(frequencies[i]));
-            }
-        }
-
-        if (root != nullptr) {
-            input.open(inputFile, std::ios::binary);
-
-            unsigned char outputByte = 0;
-            int bitCount = 0;
-
-            while (input.read(reinterpret_cast<char*>(&byte), sizeof(byte))) {
-                const std::string& code = codes[byte];
-
-                for (char bit : code) {
-                    outputByte <<= 1;
-
-                    if (bit == '1') outputByte |= 1;
-
-                    bitCount++;
-
-                    if (bitCount == 8) {
-                        output.put(static_cast<char>(outputByte));
-                        outputByte = 0;
-                        bitCount = 0;
-                    }
-                }
-            }
-
-            if (bitCount > 0) {
-                outputByte <<= (8 - bitCount);
-                output.put(static_cast<char>(outputByte));
-            }
-
-            input.close();
-        }
-
+    if (!root) {
+        ofstream output(outputFile, ios::binary);
         output.close();
-
-        std::ifstream compressedFile(outputFile, std::ios::binary | std::ios::ate);
-
-        if (!compressedFile) {
-            std::cerr << "Error: Could not read compressed file size.\n";
-            return false;
-        }
-
-        uint64_t compressedSize = static_cast<uint64_t>(compressedFile.tellg());
-        compressedFile.close();
-
-        double compressionRatio = 0.0;
-        double spaceSaved = 0.0;
-
-        if (originalSize > 0) {
-            compressionRatio = (static_cast<double>(compressedSize) / static_cast<double>(originalSize)) * 100.0;
-            spaceSaved = 100.0 - compressionRatio;
-        }
-
-        std::cout << "\n";
-        std::cout << "====================================\n";
-        std::cout << "       COMPRESSION RESULTS\n";
-        std::cout << "====================================\n";
-        std::cout << std::fixed << std::setprecision(2);
-        std::cout << "Original size      : " << originalSize << " bytes\n";
-        std::cout << "Compressed size    : " << compressedSize << " bytes\n";
-        std::cout << "Unique symbols     : " << uniqueSymbols << "\n";
-        std::cout << "Compression ratio  : " << compressionRatio << "%\n";
-        std::cout << "Space saved        : " << spaceSaved << "%\n";
-        std::cout << "Output file        : " << outputFile << "\n";
-        std::cout << "====================================\n";
-
         return true;
     }
 
-    bool decompressFile(const std::string& inputFile, const std::string& outputFile) {
-        std::ifstream input(inputFile, std::ios::binary);
+    unordered_map<unsigned char, string> codes;
+    buildCodes(root, "", codes);
 
-        if (!input) {
-            std::cerr << "Error: Could not open compressed file.\n";
-            return false;
-        }
+    ofstream output(outputFile, ios::binary);
 
-        char magic[4];
-        input.read(magic, sizeof(magic));
+    if (!output) {
+        deleteTree(root);
+        cerr << "Could not create output file\n";
+        return false;
+    }
 
-        if (magic[0] != 'H' || magic[1] != 'U' || magic[2] != 'F' || magic[3] != '2') {
-            std::cerr << "Error: Invalid or unsupported Huffman file.\n";
-            input.close();
-            return false;
-        }
+    output.write("HUF1", 4);
+    output.write(reinterpret_cast<char*>(&originalSize), sizeof(originalSize));
 
-        uint64_t originalSize = 0;
-        uint16_t uniqueSymbols = 0;
+    uint16_t uniqueSymbols = freq.size();
+    output.write(reinterpret_cast<char*>(&uniqueSymbols), sizeof(uniqueSymbols));
 
-        input.read(reinterpret_cast<char*>(&originalSize), sizeof(originalSize));
-        input.read(reinterpret_cast<char*>(&uniqueSymbols), sizeof(uniqueSymbols));
+    for (auto& p : freq) {
+        unsigned char symbol = p.first;
+        output.write(reinterpret_cast<char*>(&symbol), 1);
+        output.write(reinterpret_cast<char*>(&p.second), sizeof(p.second));
+    }
 
-        if (!input || uniqueSymbols > 256) {
-            std::cerr << "Error: Invalid Huffman file header.\n";
-            input.close();
-            return false;
-        }
+    input.open(inputFile, ios::binary);
 
-        std::array<uint64_t, 256> frequencies{};
+    unsigned char outputByte = 0;
+    int bitCount = 0;
 
-        for (uint16_t i = 0; i < uniqueSymbols; ++i) {
-            uint8_t symbol;
-            uint64_t frequency;
+    while (input.read(reinterpret_cast<char*>(&byte), 1)) {
+        for (char bit : codes[byte]) {
+            outputByte = (outputByte << 1) | (bit == '1');
+            bitCount++;
 
-            input.read(reinterpret_cast<char*>(&symbol), sizeof(symbol));
-            input.read(reinterpret_cast<char*>(&frequency), sizeof(frequency));
-
-            if (!input || frequency == 0) {
-                std::cerr << "Error: Invalid Huffman file header.\n";
-                input.close();
-                return false;
-            }
-
-            frequencies[symbol] = frequency;
-        }
-
-        buildTree(frequencies);
-
-        std::ofstream output(outputFile, std::ios::binary);
-
-        if (!output) {
-            std::cerr << "Error: Could not create output file.\n";
-            input.close();
-            return false;
-        }
-
-        if (originalSize == 0) {
-            output.close();
-            input.close();
-            std::cout << "Decompression completed successfully.\n";
-            return true;
-        }
-
-        if (root == nullptr) {
-            output.close();
-            input.close();
-            std::cerr << "Error: Invalid Huffman tree.\n";
-            return false;
-        }
-
-        if (root->isLeaf()) {
-            for (uint64_t i = 0; i < originalSize; ++i) {
-                output.put(static_cast<char>(root->symbol));
-            }
-
-            output.close();
-            input.close();
-
-            std::cout << "Decompression completed successfully.\n";
-            return true;
-        }
-
-        HuffmanNode* current = root;
-        uint64_t decodedBytes = 0;
-        unsigned char byte;
-
-        while (decodedBytes < originalSize && input.read(reinterpret_cast<char*>(&byte), sizeof(byte))) {
-            for (int bit = 7; bit >= 0 && decodedBytes < originalSize; --bit) {
-                bool bitValue = (byte >> bit) & 1;
-
-                current = bitValue ? current->right : current->left;
-
-                if (current == nullptr) {
-                    output.close();
-                    input.close();
-                    std::cerr << "Error: Invalid compressed data.\n";
-                    return false;
-                }
-
-                if (current->isLeaf()) {
-                    output.put(static_cast<char>(current->symbol));
-                    decodedBytes++;
-                    current = root;
-                }
+            if (bitCount == 8) {
+                output.write(reinterpret_cast<char*>(&outputByte), 1);
+                outputByte = 0;
+                bitCount = 0;
             }
         }
+    }
+
+    if (bitCount > 0) {
+        outputByte <<= (8 - bitCount);
+        output.write(reinterpret_cast<char*>(&outputByte), 1);
+    }
+
+    input.close();
+    output.close();
+    deleteTree(root);
+
+    return true;
+}
+
+bool decompressFile(const string& inputFile, const string& outputFile) {
+    ifstream input(inputFile, ios::binary);
+
+    if (!input) {
+        cerr << "Could not open compressed file\n";
+        return false;
+    }
+
+    char magic[4];
+    input.read(magic, 4);
+
+    if (string(magic, 4) != "HUF1") {
+        cerr << "Invalid Huffman file\n";
+        return false;
+    }
+
+    uint64_t originalSize;
+    uint16_t uniqueSymbols;
+
+    input.read(reinterpret_cast<char*>(&originalSize), sizeof(originalSize));
+    input.read(reinterpret_cast<char*>(&uniqueSymbols), sizeof(uniqueSymbols));
+
+    unordered_map<unsigned char, uint64_t> freq;
+
+    for (int i = 0; i < uniqueSymbols; i++) {
+        unsigned char symbol;
+        uint64_t frequency;
+
+        input.read(reinterpret_cast<char*>(&symbol), 1);
+        input.read(reinterpret_cast<char*>(&frequency), sizeof(frequency));
+
+        freq[symbol] = frequency;
+    }
+
+    Node* root = buildTree(freq);
+
+    ofstream output(outputFile, ios::binary);
+
+    if (!output) {
+        deleteTree(root);
+        return false;
+    }
+
+    if (originalSize == 0) {
+        output.close();
+        input.close();
+        deleteTree(root);
+        return true;
+    }
+
+    if (root->isLeaf()) {
+        for (uint64_t i = 0; i < originalSize; i++)
+            output.write(reinterpret_cast<char*>(&root->ch), 1);
 
         output.close();
         input.close();
-
-        if (decodedBytes != originalSize) {
-            std::cerr << "Error: Decompression failed.\n";
-            return false;
-        }
-
-        std::cout << "Decompression completed successfully.\n";
+        deleteTree(root);
         return true;
     }
-};
+
+    Node* current = root;
+    uint64_t decoded = 0;
+    unsigned char byte;
+
+    while (input.read(reinterpret_cast<char*>(&byte), 1) && decoded < originalSize) {
+        for (int bit = 7; bit >= 0 && decoded < originalSize; bit--) {
+            bool value = (byte >> bit) & 1;
+            current = value ? current->right : current->left;
+
+            if (current->isLeaf()) {
+                output.write(reinterpret_cast<char*>(&current->ch), 1);
+                decoded++;
+                current = root;
+            }
+        }
+    }
+
+    output.close();
+    input.close();
+    deleteTree(root);
+
+    return decoded == originalSize;
+}
+
+int main(int argc, char* argv[]) {
+    if (argc != 4) {
+        cout << "Usage: ./huffman compress <input> <output>\n";
+        cout << "       ./huffman decompress <input> <output>\n";
+        return 1;
+    }
+
+    string operation = argv[1];
+    string inputFile = argv[2];
+    string outputFile = argv[3];
+
+    if (operation == "compress") {
+        return compressFile(inputFile, outputFile) ? 0 : 1;
+    }
+
+    if (operation == "decompress") {
+        return decompressFile(inputFile, outputFile) ? 0 : 1;
+    }
+
+    return 1;
+}
